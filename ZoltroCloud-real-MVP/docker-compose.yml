@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zoltro
+      POSTGRES_PASSWORD: zoltro
+      POSTGRES_DB: zoltro
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zoltro -d zoltro"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: ./apps/api
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./apps/web
+    environment:
+      API_ORIGIN: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

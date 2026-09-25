@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZoltroCloud — Cloud Gaming</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Arial;background:#07090d;color:#f5f7fb}a{color:inherit}
+.top{height:70px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid #1b202b;background:#0b0e14;position:sticky;top:0;z-index:10}
+.logo{font-weight:900;letter-spacing:.5px;font-size:22px}.logo span{color:#7b61ff}.nav{display:flex;gap:18px;color:#9da5b5}.nav a{text-decoration:none}.actions{display:flex;gap:10px}.btn{border:1px solid #2a3140;background:#111621;color:#fff;border-radius:10px;padding:10px 14px;cursor:pointer}.primary{background:#7457ff;border-color:#7457ff}.container{max-width:1250px;margin:auto;padding:30px 24px}
+.hero{padding:42px 0 24px}.hero h1{font-size:48px;line-height:1.02;margin:0 0 14px}.hero p{color:#a9b1bf;max-width:700px;font-size:17px}.chips{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.chip{background:#111621;border:1px solid #252c38;padding:8px 12px;border-radius:999px;color:#bfc6d2}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{background:#0e121a;border:1px solid #1d2430;border-radius:16px;overflow:hidden}.card img{width:100%;aspect-ratio:16/7;object-fit:cover;display:block}.card .body{padding:15px}.muted{color:#8f98a9}.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.empty{padding:30px;background:#0e121a;border:1px dashed #293140;border-radius:14px;color:#9da5b5}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}.modal.show{display:flex}.panel{background:#0e121a;border:1px solid #293140;border-radius:18px;padding:22px;max-width:520px;width:100%}.panel h2{margin-top:0}input{width:100%;padding:12px;border-radius:9px;border:1px solid #303846;background:#080b10;color:white;margin:6px 0 10px}
+.notice{padding:12px 14px;border-radius:10px;background:#111621;border:1px solid #252c38;color:#bfc6d2;margin:16px 0}.stream{position:fixed;inset:0;background:#000;z-index:100;display:none}.stream.show{display:block}.stream iframe{width:100%;height:100%;border:0}.streambar{position:fixed;top:12px;right:12px;z-index:110;display:flex;gap:8px}
+@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}.hero h1{font-size:38px}}@media(max-width:600px){.grid{grid-template-columns:1fr}.nav{display:none}.top{padding:0 15px}.container{padding:20px 15px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo">Zoltro<span>Cloud</span></div>
+  <nav class="nav"><a href="#library">Bibliothèque</a><a href="#account">Compte</a></nav>
+  <div class="actions"><button class="btn" onclick="openAuth()">Connexion</button><button class="btn primary" onclick="openAuth('register')">Créer un compte</button></div>
+</header>
+<main class="container">
+<section class="hero">
+  <h1>Joue à tes jeux.<br><span style="color:#7b61ff">Depuis ton navigateur.</span></h1>
+  <p>ZoltroCloud est le front-end d'un vrai service de cloud gaming : compte utilisateur, liaison Steam, vérification de possession, allocation d'un GPU et diffusion WebRTC.</p>
+  <div id="status" class="notice">Connexion au serveur…</div>
+</section>
+<section id="library">
+  <div class="row"><h2>Bibliothèque</h2><button class="btn" onclick="loadGames()">Actualiser</button></div>
+  <div id="games" class="grid"></div>
+</section>
+<section id="account" style="margin-top:45px">
+  <h2>Compte</h2><div id="accountBox" class="empty">Connecte-toi pour gérer ton compte et lier Steam.</div>
+</section>
+</main>
+
+<div id="auth" class="modal"><div class="panel">
+  <h2 id="authTitle">Connexion</h2>
+  <form id="authForm">
+    <div id="nameWrap" style="display:none"><label>Nom</label><input id="displayName"></div>
+    <label>Email</label><input id="email" type="email" required>
+    <label>Mot de passe</label><input id="password" type="password" minlength="8" required>
+    <button class="btn primary" style="width:100%;margin-top:8px">Continuer</button>
+  </form>
+  <button class="btn" style="width:100%;margin-top:10px" onclick="location.href=API+'/api/auth/steam'">Continuer avec Steam</button>
+  <button class="btn" style="width:100%;margin-top:10px" onclick="closeAuth()">Fermer</button>
+  <p id="switchAuth" class="muted"></p>
+</div></div>
+
+<div id="stream" class="stream">
+  <div class="streambar"><button class="btn" onclick="stopStream()">Quitter la session</button></div>
+  <iframe id="streamFrame" allow="autoplay; fullscreen; gamepad; clipboard-read; clipboard-write"></iframe>
+</div>
+
+<script>
+const API = (localStorage.getItem("zoltro_api") || "http://localhost:8080").replace(/\/$/,"");
+let currentUser=null, authMode="login", currentSession=null;
+
+async function api(path, opts={}) {
+  const r=await fetch(API+path,{credentials:"include",headers:{"Content-Type":"application/json",...(opts.headers||{})},...opts});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error||("HTTP "+r.status));
+  return data;
+}
+async function boot(){
+  try{const m=await api("/api/auth/me");currentUser=m.user;renderAccount();document.getElementById("status").textContent=currentUser?`Connecté : ${currentUser.displayName}`:"Pas encore connecté";loadGames();}
+  catch(e){document.getElementById("status").textContent="API indisponible — démarre docker compose."}
+}
+function openAuth(mode="login"){authMode=mode;document.getElementById("auth").classList.add("show");document.getElementById("authTitle").textContent=mode==="register"?"Créer un compte":"Connexion";document.getElementById("nameWrap").style.display=mode==="register"?"block":"none";document.getElementById("switchAuth").textContent=mode==="register"?"Un compte peut ensuite être lié à Steam.":"Tu peux aussi te connecter avec Steam."}
+function closeAuth(){document.getElementById("auth").classList.remove("show")}
+document.getElementById("authForm").onsubmit=async e=>{e.preventDefault();try{const p={email:email.value,password:password.value};let d;if(authMode==="register"){p.displayName=displayName.value;d=await api("/api/auth/register",{method:"POST",body:JSON.stringify(p)})}else d=await api("/api/auth/login",{method:"POST",body:JSON.stringify(p)});currentUser=d.user;closeAuth();renderAccount();loadGames();document.getElementById("status").textContent="Connecté : "+currentUser.displayName}catch(err){alert(err.message)}}
+
+async function loadGames(){try{const {games}=await api("/api/games");gamesEl=document.getElementById("games");gamesEl.innerHTML=games.map(g=>`<article class="card"><img src="${g.image_url||''}" alt=""><div class="body"><div class="row"><strong>${g.name}</strong><span class="muted">${g.store}</span></div><button class="btn primary" style="width:100%;margin-top:12px" onclick="launch('${g.id}')">Jouer</button></div></article>`).join("")}catch(e){document.getElementById("games").innerHTML='<div class="empty">Impossible de charger la bibliothèque.</div>'}}
+async function launch(gameId){if(!currentUser){openAuth();return}try{document.getElementById("status").textContent="Allocation du GPU…";const {session}=await api("/api/sessions/launch",{method:"POST",body:JSON.stringify({gameId})});currentSession=session;if(!session.streamUrl) throw new Error("Aucun gateway WebRTC configuré");document.getElementById("streamFrame").src=session.streamUrl;document.getElementById("stream").classList.add("show")}catch(e){alert(e.message==="no_gpu_available"?"Aucun GPU libre pour le moment.":e.message);}}
+async function stopStream(){if(currentSession){try{await api("/api/sessions/"+currentSession.id+"/stop",{method:"POST"})}catch{}}document.getElementById("streamFrame").src="";document.getElementById("stream").classList.remove("show");currentSession=null}
+async function renderAccount(){const box=document.getElementById("accountBox");if(!currentUser){box.innerHTML="Connecte-toi pour gérer ton compte et lier Steam.";return}try{const {account}=await api("/api/account");box.innerHTML=`<div class="row"><div><strong>${account.display_name}</strong><div class="muted">${account.email||"Compte Steam"}</div><div class="muted">Steam : ${account.steam_id?"lié":"non lié"}</div></div><div><button class="btn" onclick="location.href=API+'/api/auth/steam'">${account.steam_id?"Relier Steam":"Lier Steam"}</button><button class="btn" onclick="logout()">Déconnexion</button></div></div>`}catch(e){box.textContent=e.message}}
+async function logout(){await api("/api/auth/logout",{method:"POST"});currentUser=null;renderAccount();document.getElementById("status").textContent="Déconnecté"}
+boot();
+</script>
+</body>
+</html>
